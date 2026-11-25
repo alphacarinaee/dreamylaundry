@@ -5,7 +5,7 @@ PostgreSQL + REST API (Node 20+, Express). Migrasi otomatis saat start.
 ## Struktur database
 `users` (kasir/operator/owner) · `customers` · `services` · `aromas` · `orders` · `order_items` · `order_status_log` · view `v_receivables`
 
-Aturan yang dijaga langsung oleh database:
+Aturan yang dijaga langsung oleh database: 
 - Status hanya boleh maju: antrian → proses → siap → diambil.
 - Pesanan belum lunas tidak bisa berstatus "diambil".
 - Nomor HP divalidasi, uang diterima tidak boleh kurang dari total saat lunas.
