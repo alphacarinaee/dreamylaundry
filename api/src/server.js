@@ -12,7 +12,7 @@ if (!SECRET || SECRET.length < 24) { console.error('JWT_SECRET wajib diisi, mini
 const app = express();
 app.set('trust proxy', 1);
 app.use(helmet());
-app.use(cors({ origin: (process.env.CORS_ORIGIN || '*').split(',').map(s => s.trim()) }));
+app.use(cors({ origin: process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',').map(s => s.trim()) : '*' }));
 app.use(express.json({ limit: '100kb' }));
 
 const wrap = f => (req, res, next) => f(req, res).catch(next);
