@@ -12,7 +12,7 @@ if (!SECRET || SECRET.length < 24) { console.error('JWT_SECRET wajib diisi, mini
 const app = express();
 app.set('trust proxy', 1);
 app.use(helmet());
-app.use(cors({ origin: (process.env.CORS_ORIGIN || '*').split(',').map(s => s.trim()) }));
+app.use(cors({ origin: process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',').map(s => s.trim()) : '*' }));
 app.use(express.json({ limit: '100kb' }));
 
 const wrap = f => (req, res, next) => f(req, res).catch(next);
@@ -177,6 +177,10 @@ app.use((e, _req, res, _next) => {
   console.error(e); res.status(500).json({ error: 'Terjadi kesalahan server' });
 });
 
-const port = process.env.PORT || 3000;
-const server = app.listen(port, () => console.log('API siap di port', port));
-for (const s of ['SIGTERM', 'SIGINT']) process.on(s, () => server.close(() => pool.end().then(() => process.exit(0))));
+if (!process.env.VERCEL) {
+  const port = process.env.PORT || 3000;
+  const server = app.listen(port, () => console.log('API siap di port', port));
+  for (const s of ['SIGTERM', 'SIGINT']) process.on(s, () => server.close(() => pool.end().then(() => process.exit(0))));
+}
+
+export default app;
