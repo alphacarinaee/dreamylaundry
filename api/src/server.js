@@ -67,9 +67,9 @@ const ORDER_SQL = `
   SELECT o.id, o.order_no, o.status, o.is_draft, o.note, o.subtotal, o.discount_pct, o.total,
          o.payment_method, o.paid_amount, o.paid_at, (o.paid_at IS NOT NULL) AS paid,
          GREATEST(o.paid_amount - o.total, 0) AS change_amount,
-         o.est_ready_at, o.shelf_code, o.created_at, o.picked_up_at,
+         o.est_ready_at, o.shelf_code, o.created_at, o.picked_up_at, o.fulfillment, o.delivery_address, o.garment_count,
          c.id AS customer_id, c.name AS customer_name, c.phone AS customer_phone, a.name AS aroma, u.name AS cashier,
-         COALESCE((SELECT json_agg(json_build_object('name',i.service_name,'qty',i.qty,'unit',i.unit,'unit_price',i.unit_price,'line_total',i.line_total) ORDER BY i.id)
+         COALESCE((SELECT json_agg(json_build_object('name',i.service_name,'qty',i.qty,'unit',i.unit,'unit_price',i.unit_price,'line_total',i.line_total,'category',(SELECT sv.category FROM services sv WHERE sv.id=i.service_id)) ORDER BY i.id)
                    FROM order_items i WHERE i.order_id=o.id), '[]') AS items
   FROM orders o JOIN customers c ON c.id=o.customer_id
   LEFT JOIN aromas a ON a.id=o.aroma_id LEFT JOIN users u ON u.id=o.cashier_id`;
@@ -79,11 +79,14 @@ const OrderIn = z.object({
   discount_pct: z.number().int().min(0).max(30).default(0),
   payment_method: z.enum(['tunai', 'qris', 'transfer', 'nanti']),
   paid_amount: z.number().int().min(0).default(0), is_draft: z.boolean().default(false),
+  fulfillment: z.enum(['ambil', 'antar']).default('ambil'), delivery_address: z.string().trim().max(200).optional(),
+  garment_count: z.number().int().min(1).max(999).optional(),
   items: z.array(z.object({ service_id: z.number().int(), qty: z.number().positive().max(999) })).min(1).max(30),
 });
 
 app.post('/orders', wrap(async (req, res) => {
   const b = OrderIn.parse(req.body);
+  if (b.fulfillment === 'antar' && (b.delivery_address || '').length < 5) return res.status(400).json({ error: 'Alamat pengantaran wajib diisi (minimal 5 karakter)' });
   const c = await pool.connect();
   try {
     await c.query('BEGIN');
@@ -100,9 +103,10 @@ app.post('/orders', wrap(async (req, res) => {
     if (pay.paid && pay.amt < total) { await c.query('ROLLBACK'); return res.status(400).json({ error: 'Uang diterima kurang dari total tagihan' }); }
     const est = Math.max(...lines.map(l => l.s.est_hours));
     const { rows: [o] } = await c.query(
-      `INSERT INTO orders(customer_id,cashier_id,aroma_id,note,subtotal,discount_pct,total,is_draft,payment_method,paid_amount,paid_at,est_ready_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, CASE WHEN $11 THEN now() END, now() + make_interval(hours => $12)) RETURNING id`,
-      [b.customer_id, req.user.sub, b.aroma_id ?? null, b.note ?? null, subtotal, b.discount_pct, total, b.is_draft, b.payment_method, pay.amt, pay.paid, est]);
+      `INSERT INTO orders(customer_id,cashier_id,aroma_id,note,subtotal,discount_pct,total,is_draft,payment_method,paid_amount,paid_at,est_ready_at,fulfillment,delivery_address,garment_count)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, CASE WHEN $11 THEN now() END, now() + make_interval(hours => $12),$13,$14,$15) RETURNING id`,
+      [b.customer_id, req.user.sub, b.aroma_id ?? null, b.note ?? null, subtotal, b.discount_pct, total, b.is_draft, b.payment_method, pay.amt, pay.paid, est,
+       b.fulfillment, b.fulfillment === 'antar' ? b.delivery_address : null, b.garment_count ?? null]);
     for (const l of lines)
       await c.query('INSERT INTO order_items(order_id,service_id,service_name,unit,qty,unit_price) VALUES ($1,$2,$3,$4,$5,$6)', [o.id, l.service_id, l.s.name, l.s.unit, l.qty, l.s.price]);
     await c.query('COMMIT');
@@ -136,6 +140,7 @@ app.get('/orders/:id', wrap(async (req, res) => {
 app.patch('/orders/:id/status', wrap(async (req, res) => {
   const b = z.object({
     status: z.enum(STATUSES), shelf_code: z.string().max(20).optional(),
+    garment_count: z.number().int().min(1).max(999).optional(),
     payment: z.object({ method: z.enum(['tunai', 'qris', 'transfer']), paid_amount: z.number().int().min(0) }).optional(),
   }).parse(req.body);
   const c = await pool.connect();
@@ -145,12 +150,13 @@ app.patch('/orders/:id/status', wrap(async (req, res) => {
     const { rows: [o] } = await c.query('SELECT * FROM orders WHERE id=$1 AND NOT is_draft FOR UPDATE', [req.params.id]);
     if (!o) { await c.query('ROLLBACK'); return res.status(404).json({ error: 'Pesanan tidak ditemukan' }); }
     if (STATUSES.indexOf(b.status) !== STATUSES.indexOf(o.status) + 1) { await c.query('ROLLBACK'); return res.status(409).json({ error: `Status harus maju satu tahap dari "${o.status}"` }); }
+    if (b.status === 'proses' && !b.garment_count && !o.garment_count) { await c.query('ROLLBACK'); return res.status(400).json({ error: 'Isi jumlah pakaian sebelum mulai proses' }); }
     if (b.payment && !o.paid_at) {
       const amt = b.payment.method === 'tunai' ? b.payment.paid_amount : o.total;
       if (amt < o.total) { await c.query('ROLLBACK'); return res.status(400).json({ error: 'Uang diterima kurang dari total tagihan' }); }
       await c.query('UPDATE orders SET payment_method=$2, paid_amount=$3, paid_at=now() WHERE id=$1', [o.id, b.payment.method, amt]);
     }
-    await c.query('UPDATE orders SET status=$2, shelf_code=COALESCE($3, shelf_code) WHERE id=$1', [o.id, b.status, b.shelf_code ?? null]);
+    await c.query('UPDATE orders SET status=$2, shelf_code=COALESCE($3, shelf_code), garment_count=COALESCE($4, garment_count) WHERE id=$1', [o.id, b.status, b.shelf_code ?? null, b.garment_count ?? null]);
     await c.query('COMMIT');
     res.json((await pool.query(ORDER_SQL + ' WHERE o.id=$1', [o.id])).rows[0]);
   } catch (e) { await c.query('ROLLBACK').catch(() => {}); throw e; } finally { c.release(); }
