@@ -126,8 +126,22 @@ const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&
 const API=(window.API_URL||'').replace(/\/$/,'');
 const DEMO=window.DEMO===true;
 const M={users:{rina:{id:1,name:'Rina Oktaviani',role:'kasir'},owner:{id:2,name:'Owner Dreamy Laundry',role:'owner'}},
- svcs:[['Cuci Komplit Reguler','Cuci, kering, setrika, 2 hari','kiloan','kg',7000,48],['Setrika Saja','Setrika uap rapi wangi','kiloan','kg',5000,24],['Cuci Kering Lipat','Tanpa setrika, langsung dilipat','kiloan','kg',6000,24],['Express 6 Jam','Prioritas cuci kering setrika','express','kg',12000,6],['Bed Cover King','Plastik vakum','satuan','pcs',30000,48],['Jas Formal / Blazer','Dry cleaning + hanger','satuan','pcs',35000,48]].map((a,i)=>({id:i+1,name:a[0],description:a[1],category:a[2],unit:a[3],price:a[4],est_hours:a[5]})),
- aromas:['Ocean Fresh','Lavender Dream','Soft Floral','Sakura Blossom'].map((name,i)=>({id:i+1,name})),
+ svcs:[
+  ['Cuci Gosok (3 Hari)','Cuci bersih + setrika rapi, selesai 3 hari','kiloan','kg',5000,72],
+  ['Cuci Gosok (1 Hari)','Cuci bersih + setrika rapi, selesai 1 hari','express','kg',10000,24],
+  ['Cuci Gosok (6 Jam)','Prioritas cuci + setrika, selesai 6 jam','express','kg',12000,6],
+  ['Cuci Kering (3 Hari)','Cuci bersih + kering lipat, selesai 3 hari','kiloan','kg',4000,72],
+  ['Cuci Kering (1 Hari)','Cuci bersih + kering lipat, selesai 1 hari','express','kg',8000,24],
+  ['Cuci Kering (6 Jam)','Prioritas cuci + kering lipat, selesai 6 jam','express','kg',10000,6],
+  ['Cuci Basah (3 Hari)','Cuci bersih tanpa pengeringan, selesai 3 hari','kiloan','kg',3000,72],
+  ['Sprei','Cuci satuan sprei bersih & wangi','satuan','pcs',10000,72],
+  ['Bedcover','Cuci satuan bedcover bersih & rapi','satuan','pcs',20000,72],
+  ['Boneka, Bantal, dan Guling','Cuci khusus boneka, bantal, atau guling','satuan','pcs',15000,72],
+  ['Karpet','Cuci bersih karpet satuan','satuan','pcs',15000,72],
+  ['Sepatu','Cuci bersih sepatu satuan','satuan','pcs',25000,72],
+  ['Custom (Baju Satuan, Jas, dan Lainnya)','Tarif dihitung secara manual oleh kasir','satuan','pcs',0,72]
+ ].map((a,i)=>({id:i+1,name:a[0],description:a[1],category:a[2],unit:a[3],price:a[4],est_hours:a[5]})),
+ aromas:[],
  cust:[['Ibu Siti Rahmawati','0812-9843-1120','Jl. Melati No. 4B','Reguler'],['Ibu Siska Amelia','0813-8899-7711','Jl. Kenanga 12','Gold'],['Mba Anisa Rahma','0877-2233-4455','Perum Asri B-7','Reguler'],['Pak Bagus Wicaksono','0811-9876-5432','Jl. Mawar 3','Silver']].map((a,i)=>({id:i+1,name:a[0],phone:a[1],address:a[2],member_tier:a[3]})),n:0,orders:[]};
 function mock(p,b){
   const bad=m=>{throw new Error(m)};
@@ -171,7 +185,7 @@ function mock(p,b){
 
 const PAY=[['tunai','Tunai'],['qris','QRIS'],['transfer','Transfer'],['nanti','Nanti']];
 const TABS=[['Semua',null],['Kiloan (Kg)','kiloan'],['Satuan (Pcs)','satuan'],['Express ⚡','express']];
-const S0=()=>({cat:null,cust:null,found:[],cart:[],w:4.5,note:'',disc:0,pay:'tunai',cash:0,done:null,reg:false,busy:false,ful:'ambil',addr:''});
+const S0=()=>({cat:null,pf:'',cust:null,found:[],cart:[],w:4.5,note:'',disc:0,pay:'tunai',cash:0,done:null,reg:false,busy:false,ful:'ambil',addr:''});
 let S={user:null,token:null,svcs:[],aromas:[],aroma:null,page:'kasir',...S0()};
 const ymd=(d=new Date())=>d.toLocaleDateString('en-CA',{timeZone:'Asia/Jakarta'});
 const R0=()=>({f:{q:'',from:ymd(),to:ymd(),paid:'',status:''},list:[],sel:null,more:false,busy:false,err:''});
@@ -257,7 +271,7 @@ async function doLogin(){
     try{sessionStorage.setItem('dl',JSON.stringify({token:d.token,user:d.user}))}catch{}
     await boot()}catch(e){$('#le').textContent=e.message}}
 async function boot(){
-  try{[S.svcs,S.aromas]=await Promise.all([api('/services'),api('/aromas')]);S.aroma=S.aromas[0]?.id??null}catch(e){toast(e.message)}
+  try{S.svcs=await api('/services')}catch(e){toast(e.message)}
   render()}
 function shell(){
   const own=S.user.role==='owner';
@@ -392,21 +406,30 @@ function rDet(){
   <button class="p" data-a="rprint" style="width:100%;margin-top:14px">Cetak Struk / PDF</button>`}
 
 // ---- Kasir (Pencatatan Transaksi) ----
+function filtSvcs(){
+  let L=S.svcs.filter(s=>!S.cat||s.category===S.cat);
+  if(S.pf==='le10')L=L.filter(s=>s.price>0&&s.price<=10000);
+  else if(S.pf==='10to20')L=L.filter(s=>s.price>10000&&s.price<=20000);
+  else if(S.pf==='gt20')L=L.filter(s=>s.price>20000);
+  else if(S.pf==='asc')L=[...L].sort((a,b)=>a.price-b.price);
+  else if(S.pf==='desc')L=[...L].sort((a,b)=>b.price-a.price);
+  return L}
 function kasir(){
+  const L=filtSvcs();
   $('#view').innerHTML=`<div class="cols"><div class="stack">
   <div class="card" id="cust"></div>
-  <div class="card"><div class="row b w" style="margin-bottom:14px"><div><h2>Layanan</h2><div class="mu">Pilih kategori dan tambahkan layanan ke nota</div></div><div class="tabs">${TABS.map(t=>`<button class="${S.cat===t[1]?'on':''}" data-cat="${t[1]??''}">${t[0]}</button>`).join('')}</div></div>
-   <div class="grid">${S.svcs.filter(s=>!S.cat||s.category===S.cat).map(s=>{const inc=S.cart.find(i=>i.id===s.id);const catB=s.category==='express'?'<span class="bd ex">⚡ Express</span>':s.unit==='pcs'?'<span class="bd st">Satuan</span>':'<span class="bd st">Kiloan</span>';return`<button class="svc ${inc?'in':''}" data-add="${s.id}"><div class="svc-top"><span class="svc-ico ${s.category==='express'?'ex':''}">${SVC_ICO(s)}</span><div class="row">${inc?`<span class="bd ok">✓ ${inc.qty} ${s.unit}</span>`:catB}</div></div><b>${esc(s.name)}</b><span class="mu">${esc(s.description||'')}</span><div class="svc-foot"><div><div class="mu">Tarif</div><div class="pr">${rp(s.price)}<small>/${s.unit}</small></div></div><span class="plus-c">${inc?'✓':'+'}</span></div></button>`}).join('')||'<p class="mu">Layanan belum tersedia.</p>'}</div></div>
-  <div class="card"><div class="row b" style="margin-bottom:14px"><div><h2>Timbangan & Aroma</h2><div class="mu">Atur berat cucian (kg) dan parfum laundry</div></div><span class="tag">Mode: Kg</span></div>
+  <div class="card"><div class="row b w" style="margin-bottom:14px"><div><h2>Layanan</h2><div class="mu">Pilih kategori dan filter harga paket Dreamy Laundry</div></div>
+   <div class="row w"><div class="tabs">${TABS.map(t=>`<button class="${S.cat===t[1]?'on':''}" data-cat="${t[1]??''}">${t[0]}</button>`).join('')}</div>
+   <select id="pf" aria-label="Filter harga" style="width:auto;min-height:34px;font-size:12px;border-radius:99px;padding:0 12px">${[['','Semua Harga'],['asc','Termurah'],['desc','Termahal'],['le10','≤ Rp 10.000'],['10to20','Rp 10rb–20rb'],['gt20','> Rp 20.000']].map(o=>`<option value="${o[0]}" ${S.pf===o[0]?'selected':''}>${o[1]}</option>`).join('')}</select></div></div>
+   <div class="grid">${L.map(s=>{const inc=S.cart.find(i=>i.id===s.id);const catB=s.category==='express'?`<span class="bd ex">⚡ ${s.est_hours===6?'6 Jam':'1 Hari'}</span>`:s.unit==='pcs'?'<span class="bd st">Satuan</span>':'<span class="bd st">3 Hari</span>';return`<button class="svc ${inc?'in':''}" data-add="${s.id}"><div class="svc-top"><span class="svc-ico ${s.category==='express'?'ex':''}">${SVC_ICO(s)}</span><div class="row">${inc?`<span class="bd ok">✓ ${inc.qty} ${s.unit}</span>`:catB}</div></div><b>${esc(s.name)}</b><span class="mu">${esc(s.description||'')}</span><div class="svc-foot"><div><div class="mu">Tarif</div><div class="pr">${s.price?`${rp(s.price)}<small>/${s.unit}</small>`:'Manual'}</div></div><span class="plus-c">${inc?'✓':'+'}</span></div></button>`}).join('')||'<p class="mu">Tidak ada layanan sesuai filter.</p>'}</div></div>
+  <div class="card"><div class="row b" style="margin-bottom:14px"><div><h2>Timbangan & Catatan</h2><div class="mu">Atur berat cucian (kg) dan catatan khusus</div></div><span class="tag">Mode: Kg</span></div>
    <div class="scale-grid">
     <div class="wt-box"><div class="row b"><span class="mu" style="font-weight:700;letter-spacing:.04em">TIMBANGAN DIGITAL</span><button data-w="r" style="min-height:28px;padding:0 10px;font-size:12px">↺ Reset</button></div>
      <div class="wt-val"><span id="wv">${S.w.toFixed(2)}</span> <small>Kg</small></div>
      <div class="g4">${[-.5,.5,1,5].map(d=>`<button data-w="${d}" style="min-height:36px;padding:0;font-size:12px">${d>0?'+':''}${d.toFixed(1)}</button>`).join('')}</div></div>
     <div class="stack" style="gap:10px">
-     <div><div class="mu" style="font-weight:700;margin-bottom:6px">Pilihan Aroma Parfum Laundry:</div>
-      <div class="ar-grid">${S.aromas.map(a=>`<button class="ar-btn ${S.aroma===a.id?'on':''}" data-ar="${a.id}"><span>${esc(a.name)}</span><span>${S.aroma===a.id?'✓':''}</span></button>`).join('')}</div></div>
-     <div><div class="mu" style="font-weight:700;margin-bottom:6px">Catatan Khusus Cucian:</div>
-      <textarea id="nt" rows="2" placeholder="Contoh: noda tinta di kemeja putih lengan kanan">${esc(S.note)}</textarea></div>
+     <div style="flex:1;display:flex;flex-direction:column"><div class="mu" style="font-weight:700;margin-bottom:6px">Catatan Khusus Cucian:</div>
+      <textarea id="nt" rows="5" style="flex:1" placeholder="Contoh: noda tinta di kemeja putih lengan kanan, atau rincian barang custom">${esc(S.note)}</textarea></div>
     </div>
    </div></div>
   </div><div class="card" id="nota"></div></div>`;
@@ -429,7 +452,7 @@ function rNota(){
   const estD=tgl(new Date(Date.now()+estH*36e5).toISOString());
   el.innerHTML=`<div class="row b"><div><div class="mu" style="font-weight:700;letter-spacing:.04em">NOTA TRANSAKSI KASIR</div><b style="font-size:17px">#BARU (Draft)</b></div><span class="tag">${S.cart.length} Item</span></div>
   <div class="est-box"><span>Estimasi Selesai / Ambil:</span><b>${estD}</b></div>
-  ${S.cart.length?S.cart.map((i,x)=>`<div class="line"><span><b>${esc(i.n)}</b><br><span class="mu">${i.qty} ${i.u} × ${rp(i.p)}</span></span><span class="row"><b>${rp(i.qty*i.p)}</b><button data-del="${x}" aria-label="Hapus" style="min-height:32px;padding:0 10px">🗑</button></span></div>`).join(''):'<p class="mu">Belum ada layanan. Pilih layanan di sebelah kiri.</p>'}
+  ${S.cart.length?S.cart.map((i,x)=>`<div class="line" style="flex-wrap:wrap"><span><b>${esc(i.n)}</b><br><span class="mu">${i.qty} ${i.u} × ${i.custom?'Harga manual':rp(i.p)}</span></span><span class="row">${i.custom?`<input type="number" min="0" inputmode="numeric" data-cp="${x}" value="${i.p||''}" placeholder="Rp" style="width:105px;min-height:34px;text-align:right;font-weight:700">`:`<b>${rp(i.qty*i.p)}</b>`}<button data-del="${x}" aria-label="Hapus" style="min-height:32px;padding:0 10px">🗑</button></span></div>`).join(''):'<p class="mu">Belum ada layanan. Pilih layanan di sebelah kiri.</p>'}
   <div class="dash">
    <div class="row b" style="margin-bottom:6px"><span class="mu">Subtotal (${S.cart.length} Item)</span><b>${rp(sub())}</b></div>
    <div class="row b" style="margin-bottom:8px"><span class="mu">Diskon</span><select id="dc" style="width:90px;min-height:34px">${[0,5,10].map(d=>`<option value="${d}" ${S.disc==d?'selected':''}>${d}%</option>`).join('')}</select></div>
@@ -450,10 +473,11 @@ async function save(){
   const e=m=>($('#se').textContent=m,false);
   if(!S.cust)return e('Pilih atau daftarkan pelanggan dulu');
   if(!S.cart.length)return e('Tambahkan layanan dulu');
+  if(S.cart.some(i=>i.custom&&!(i.p>0)))return e('Isi harga manual untuk layanan Custom');
   if(S.ful==='antar'&&S.addr.trim().length<5)return e('Isi alamat pengantaran (minimal 5 karakter)');
   const t=total();if(S.pay==='tunai'&&S.cash<t)return e('Uang diterima kurang dari total tagihan');
   S.busy=true;rNota();
-  try{S.done=await api('/orders',{customer_id:S.cust.id,aroma_id:S.aroma,note:S.note||undefined,discount_pct:S.disc,payment_method:S.pay,paid_amount:S.pay==='tunai'?S.cash:0,fulfillment:S.ful,delivery_address:S.ful==='antar'?S.addr.trim():undefined,items:S.cart.map(i=>({service_id:i.id,qty:i.qty}))})}
+  try{S.done=await api('/orders',{customer_id:S.cust.id,note:S.note||undefined,discount_pct:S.disc,payment_method:S.pay,paid_amount:S.pay==='tunai'?S.cash:0,fulfillment:S.ful,delivery_address:S.ful==='antar'?S.addr.trim():undefined,items:S.cart.map(i=>({service_id:i.id,qty:i.qty,...(i.custom?{custom_price:i.p}:{})}))})}
   catch(x){S.busy=false;rNota();return e(x.message)}
   S.busy=false;rNota();toast('Nota '+S.done.order_no+' tersimpan')}
 async function regSave(){
@@ -463,7 +487,7 @@ async function regSave(){
 function addSvc(id){const s=S.svcs.find(x=>x.id==id);if(S.done)return;
   if(s.unit==='kg'&&S.w<=0)return toast('Timbang cucian dulu');
   const q=s.unit==='kg'?S.w:1,x=S.cart.find(i=>i.id===s.id);
-  if(x)x.qty=s.unit==='pcs'?x.qty+1:q;else S.cart.push({id:s.id,n:s.name,u:s.unit,p:s.price,h:s.est_hours||48,qty:q});
+  if(x)x.qty=s.unit==='pcs'?x.qty+1:q;else S.cart.push({id:s.id,n:s.name,u:s.unit,p:s.price,custom:s.price===0,h:s.est_hours||72,qty:q});
   kasir()}
 async function findCust(q=''){
   const cr=$('#cr');if(!cr)return;
@@ -498,10 +522,12 @@ document.addEventListener('keydown',e=>{if(e.key!=='Enter')return;const id=e.tar
   if(id==='lu'||id==='lp')doLogin();else if(id==='kc'||id==='kpc')kSave();
   else if(id==='gs'){R.f.q=e.target.value.trim();R.f.from='';R.f.to='';S.page='riwayat';shell()}});
 document.addEventListener('change',e=>{const t=e.target;if(t.id==='dc'){S.disc=+t.value;rNota()}
+  else if(t.id==='pf'){S.pf=t.value;kasir()}
   else if(['ff','ft','fp','fs'].includes(t.id)){R.f[{ff:'from',ft:'to',fp:'paid',fs:'status'}[t.id]]=t.value;loadR(true)}});
 document.addEventListener('focusin',e=>{if(e.target.id==='cs'&&!e.target.value.trim())findCust('')});
 let tm;document.addEventListener('input',e=>{const t=e.target;
-  if(t.id==='cs'){clearTimeout(tm);const q=t.value.trim();tm=setTimeout(()=>findCust(q),250)}
+  if(t.dataset.cp!==undefined){const i=S.cart[+t.dataset.cp];if(i){i.p=Math.max(0,Math.floor(+t.value||0));const subEl=$('#nota .dash b');if(subEl)subEl.textContent=rp(sub());const totEl=$('#nota .tot');if(totEl)totEl.textContent=rp(total())}}
+  else if(t.id==='cs'){clearTimeout(tm);const q=t.value.trim();tm=setTimeout(()=>findCust(q),250)}
   else if(t.id==='kq'){K.q=t.value.trim();rBoard()}
   else if(t.id==='kpc'){K.pcs=Math.max(0,Math.floor(+t.value||0));$('#ke')&&($('#ke').textContent='')}
   else if(t.id==='kc'){K.cash=+t.value;$('#ke')&&($('#ke').textContent='');const o=kFind(K.act),c=K.cash-(o?o.total:0),k=$('#kk');if(k){k.textContent=rp(Math.max(c,0));k.style.color=c<0?'var(--bad)':'var(--pri)'}}
